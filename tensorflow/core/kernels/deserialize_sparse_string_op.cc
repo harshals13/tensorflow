@@ -165,7 +165,10 @@ class DeserializeSparseOp : public OpKernel {
     std::vector<SparseTensor> tensors;
     tensors.reserve(num_sparse_tensors);
     for (int i = 0; i < num_sparse_tensors; ++i) {
-      tensors.emplace_back(indices[i], values[i], shape, std_order);
+      SparseTensor tensor;
+      OP_REQUIRES_OK(context, SparseTensor::Create(indices[i], values[i], shape,
+                                                   std_order, &tensor));
+      tensors.push_back(std::move(tensor));
     }
 
     gtl::optional<SparseTensor> maybe_output;
@@ -201,8 +204,6 @@ class DeserializeSparseOp : public OpKernel {
       target_shape.vec<int64>()(i + ndims - 1) = output.shape().data()[i + 1];
     }
 
-    Tensor output_indices;
-    Tensor output_shape;
     Reshape(context, output.indices(), input_shape, target_shape,
             0 /* output indices index */, 2 /* output shape index */);
     context->set_output(1, output.values());

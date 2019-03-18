@@ -20,10 +20,13 @@ limitations under the License.
 #include <unordered_map>
 #include <unordered_set>
 
+#include "absl/strings/str_cat.h"
+#include "tensorflow/compiler/jit/deadness_analysis.h"
 #include "tensorflow/compiler/jit/defs.h"
 #include "tensorflow/compiler/jit/graphcycles/graphcycles.h"
 #include "tensorflow/compiler/jit/union_find.h"
 #include "tensorflow/compiler/jit/xla_cluster_util.h"
+#include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/core/common_runtime/shape_refiner.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/graph/graph_constructor.h"
@@ -40,8 +43,8 @@ static bool IsShapeConsumerOp(const Node& node) {
 }
 
 // Returns true if the op can be decomposed into XLA ops for which
-// there are fusable elemental implementations.
-bool IsXlaFusable(const NodeDef& node) {
+// there are fusible elemental implementations.
+static bool IsXlaFusible(const NodeDef& node) {
   static const std::unordered_set<std::string>* elementwise_ops =
       new std::unordered_set<std::string>(
           {// tf2xla/kernels/aggregate_ops.cc
@@ -146,6 +149,9 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
   TF_RETURN_IF_ERROR(
       ImportGraphDef(options, item.graph, &graph, &shape_refiner));
 
+  std::unique_ptr<DeadnessAnalysis> deadness;
+  TF_RETURN_IF_ERROR(DeadnessAnalysis::Run(graph, &deadness));
+
   // Collect nodes that can be fused via XLA, while ignoring those that
   // explicitly ask for XLA: (*) nodes that are marked to be compiled
   // explicitly. (*) nodes assigned to XLA device.
@@ -172,9 +178,9 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
     TF_RETURN_IF_ERROR(DeviceToDeviceType(node->def().device(), &device_type));
     if (device_type.type_string().find("XLA") != string::npos) continue;
 
-    // Assume all fusable ops are registered.
+    // Assume all fusible ops are registered.
     // TODO(hpucha): Check for registration if possible.
-    if (!IsXlaFusable(node->def())) {
+    if (!IsXlaFusible(node->def())) {
       continue;
     }
 
@@ -182,6 +188,14 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
     // the XLA cluster so it can't implement the forward-tensor-ref semantic.
     // Leave such nodes out of XLA clusters.
     if (HasForwardedRefInput(*node)) {
+      continue;
+    }
+
+    // If inputs to `node` can have conflicting deadness (i.e. some are alive
+    // and some are dead) then don't compile it.  XLA cannot represent the
+    // deadness semantics of these nodes correctly and auto-clustering these
+    // nodes can cause deadness to propagate to nodes that should be live.
+    if (node->IsMerge() || deadness->HasInputsWithMismatchingDeadness(*node)) {
       continue;
     }
 
@@ -195,7 +209,14 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
   }
 
   GraphCycles cycles;
-  TF_RETURN_IF_ERROR(CreateCycleDetectionGraph(&graph, &cycles));
+  TF_ASSIGN_OR_RETURN(bool cycle_detection_graph_ok,
+                      CreateCycleDetectionGraph(&graph, &cycles));
+  if (!cycle_detection_graph_ok) {
+    return Status::OK();
+  }
+
+  TF_RETURN_IF_ERROR(AdjustCycleDetectionGraphForResourceOps(
+      &graph, &graph.flib_def(), /*resource_ops_to_ignore=*/{}, &cycles));
 
   // TODO(hpucha): Make clustering more robust. There are two known issues that
   // we need to mitigate: (a) Non-resource variables can cause deadlocks
@@ -312,7 +333,7 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
       string& name = cluster_names[cluster];
 
       if (name.empty()) {
-        name = strings::StrCat("cluster_", cluster_sequence_num++);
+        name = absl::StrCat("cluster_", cluster_sequence_num++);
       }
       n->AddAttr(kXlaClusterAttr, name);
       VLOG(3) << "Assigning node " << n->name() << " to cluster " << name;

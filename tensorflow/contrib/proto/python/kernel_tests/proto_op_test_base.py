@@ -38,17 +38,18 @@ class ProtoOpTestBase(test.TestCase):
       ct.cdll.LoadLibrary(lib)
 
   @staticmethod
-  def named_parameters():
-    return (
-        ("defaults", ProtoOpTestBase.defaults_test_case()),
-        ("minmax", ProtoOpTestBase.minmax_test_case()),
-        ("nested", ProtoOpTestBase.nested_test_case()),
-        ("optional", ProtoOpTestBase.optional_test_case()),
-        ("promote_unsigned", ProtoOpTestBase.promote_unsigned_test_case()),
-        ("ragged", ProtoOpTestBase.ragged_test_case()),
-        ("shaped_batch", ProtoOpTestBase.shaped_batch_test_case()),
-        ("simple", ProtoOpTestBase.simple_test_case()),
-    )
+  def named_parameters(extension=True):
+    parameters = [("defaults", ProtoOpTestBase.defaults_test_case()),
+                  ("minmax", ProtoOpTestBase.minmax_test_case()),
+                  ("nested", ProtoOpTestBase.nested_test_case()),
+                  ("optional", ProtoOpTestBase.optional_test_case()),
+                  ("promote", ProtoOpTestBase.promote_test_case()),
+                  ("ragged", ProtoOpTestBase.ragged_test_case()),
+                  ("shaped_batch", ProtoOpTestBase.shaped_batch_test_case()),
+                  ("simple", ProtoOpTestBase.simple_test_case())]
+    if extension:
+      parameters.append(("extension", ProtoOpTestBase.extension_test_case()))
+    return parameters
 
   @staticmethod
   def defaults_test_case():
@@ -83,13 +84,13 @@ class ProtoOpTestBase(test.TestCase):
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "uint64_value_with_default"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(4)
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(4)
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "fixed64_value_with_default"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(6)
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(6)
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "int32_value_with_default"
@@ -108,13 +109,13 @@ class ProtoOpTestBase(test.TestCase):
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "uint32_value_with_default"
-    field.dtype = types_pb2.DT_INT32
-    field.value.int32_value.append(9)
+    field.dtype = types_pb2.DT_UINT32
+    field.value.uint32_value.append(9)
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "fixed32_value_with_default"
-    field.dtype = types_pb2.DT_INT32
-    field.value.int32_value.append(7)
+    field.dtype = types_pb2.DT_UINT32
+    field.value.uint32_value.append(7)
     test_case.sizes.append(0)
     field = test_case.fields.add()
     field.name = "bool_value_with_default"
@@ -202,15 +203,15 @@ class ProtoOpTestBase(test.TestCase):
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "uint64_value"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(0)
-    field.value.int64_value.append(-1)
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(0)
+    field.value.uint64_value.append(18446744073709551615)
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "fixed64_value"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(0)
-    field.value.int64_value.append(-1)
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(0)
+    field.value.uint64_value.append(18446744073709551615)
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "int32_value"
@@ -232,15 +233,15 @@ class ProtoOpTestBase(test.TestCase):
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "uint32_value"
-    field.dtype = types_pb2.DT_INT32
-    field.value.int32_value.append(0)
-    field.value.int32_value.append(-1)
+    field.dtype = types_pb2.DT_UINT32
+    field.value.uint32_value.append(0)
+    field.value.uint32_value.append(4294967295)
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "fixed32_value"
-    field.dtype = types_pb2.DT_INT32
-    field.value.int32_value.append(0)
-    field.value.int32_value.append(-1)
+    field.dtype = types_pb2.DT_UINT32
+    field.value.uint32_value.append(0)
+    field.value.uint32_value.append(4294967295)
     test_case.sizes.append(2)
     field = test_case.fields.add()
     field.name = "bool_value"
@@ -289,28 +290,40 @@ class ProtoOpTestBase(test.TestCase):
     return test_case
 
   @staticmethod
-  def promote_unsigned_test_case():
+  def promote_test_case():
     test_case = test_example_pb2.TestCase()
     value = test_case.values.add()
+    value.sint32_value.append(2147483647)
+    value.sfixed32_value.append(2147483647)
+    value.int32_value.append(2147483647)
     value.fixed32_value.append(4294967295)
     value.uint32_value.append(4294967295)
     test_case.shapes.append(1)
     test_case.sizes.append(1)
     field = test_case.fields.add()
-    field.name = "fixed32_value"
+    field.name = "sint32_value"
     field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(4294967295)
+    field.value.int64_value.append(2147483647)
+    test_case.sizes.append(1)
+    field = test_case.fields.add()
+    field.name = "sfixed32_value"
+    field.dtype = types_pb2.DT_INT64
+    field.value.int64_value.append(2147483647)
+    test_case.sizes.append(1)
+    field = test_case.fields.add()
+    field.name = "int32_value"
+    field.dtype = types_pb2.DT_INT64
+    field.value.int64_value.append(2147483647)
+    test_case.sizes.append(1)
+    field = test_case.fields.add()
+    field.name = "fixed32_value"
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(4294967295)
     test_case.sizes.append(1)
     field = test_case.fields.add()
     field.name = "uint32_value"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(4294967295)
-    # Comes from an explicitly-specified default
-    test_case.sizes.append(0)
-    field = test_case.fields.add()
-    field.name = "uint32_value_with_default"
-    field.dtype = types_pb2.DT_INT64
-    field.value.int64_value.append(9)
+    field.dtype = types_pb2.DT_UINT64
+    field.value.uint64_value.append(4294967295)
     return test_case
 
   @staticmethod
@@ -385,6 +398,21 @@ class ProtoOpTestBase(test.TestCase):
     field.value.bool_value.append(True)
     field.value.bool_value.append(False)
     field.value.bool_value.append(True)
+    return test_case
+
+  @staticmethod
+  def extension_test_case():
+    test_case = test_example_pb2.TestCase()
+    value = test_case.values.add()
+    message_value = value.Extensions[test_example_pb2.ext_value].add()
+    message_value.double_value = 23.5
+    test_case.shapes.append(1)
+    test_case.sizes.append(1)
+    field = test_case.fields.add()
+    field.name = test_example_pb2.ext_value.full_name
+    field.dtype = types_pb2.DT_STRING
+    message_value = field.value.Extensions[test_example_pb2.ext_value].add()
+    message_value.double_value = 23.5
     return test_case
 
   @staticmethod

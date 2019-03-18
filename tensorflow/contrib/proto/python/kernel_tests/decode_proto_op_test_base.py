@@ -84,7 +84,10 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
       values = field_dict[field.name]
       self.assertEqual(dtypes.as_dtype(values.dtype), field.dtype)
 
-      fd = field.value.DESCRIPTOR.fields_by_name[field.name]
+      if 'ext_value' in field.name:
+        fd = test_example_pb2.PrimitiveValue()
+      else:
+        fd = field.value.DESCRIPTOR.fields_by_name[field.name]
 
       # Values has the same shape as the input plus an extra
       # dimension for repeats.
@@ -92,13 +95,16 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
 
       # Nested messages are represented as TF strings, requiring
       # some special handling.
-      if field.name == 'message_value':
+      if field.name == 'message_value' or 'ext_value' in field.name:
         vs = []
         for buf in values.flat:
           msg = test_example_pb2.PrimitiveValue()
           msg.ParseFromString(buf)
           vs.append(msg)
-        evs = getattr(field.value, field.name)
+        if 'ext_value' in field.name:
+          evs = field.value.Extensions[test_example_pb2.ext_value]
+        else:
+          evs = getattr(field.value, field.name)
         if len(vs) != len(evs):
           self.fail('Field %s decoded %d outputs, expected %d' %
                     (fd.name, len(vs), len(evs)))
@@ -106,34 +112,27 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
           self.assertEqual(v, ev)
         continue
 
-      # This can be a little confusing. For testing we are using TestValue in
-      # two ways: it's the proto that we decode for testing, and it's used in
-      # the expected value as a union type.
-      #
-      # The two cases are slightly different: this is the second case. We may be
-      # fetching the uint64_value from the test proto, but in the expected proto
-      # we store it in the int64_value field because TensorFlow doesn't support
-      # unsigned int64.
       tf_type_to_primitive_value_field = {
+          dtypes.bool:
+              'bool_value',
           dtypes.float32:
               'float_value',
           dtypes.float64:
               'double_value',
-          dtypes.int32:
-              'int32_value',
-          dtypes.uint8:
-              'uint8_value',
           dtypes.int8:
               'int8_value',
-          dtypes.string:
-              'string_value',
+          dtypes.int32:
+              'int32_value',
           dtypes.int64:
               'int64_value',
-          dtypes.bool:
-              'bool_value',
-          # Unhandled TensorFlow types:
-          # DT_INT16 DT_COMPLEX64 DT_QINT8 DT_QUINT8 DT_QINT32
-          # DT_BFLOAT16 DT_QINT16 DT_QUINT16 DT_UINT16
+          dtypes.string:
+              'string_value',
+          dtypes.uint8:
+              'uint8_value',
+          dtypes.uint32:
+              'uint32_value',
+          dtypes.uint64:
+              'uint64_value',
       }
       tf_field_name = tf_type_to_primitive_value_field.get(field.dtype)
       if tf_field_name is None:
@@ -177,7 +176,7 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
     field_names = [f.name for f in fields]
     output_types = [f.dtype for f in fields]
 
-    with self.test_session() as sess:
+    with self.cached_session() as sess:
       sizes, vtensor = self._decode_module.decode_proto(
           batch,
           message_type=message_type,
@@ -230,7 +229,8 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
         sanitize=False,
         force_disordered=True)
 
-  @parameterized.named_parameters(*test_base.ProtoOpTestBase.named_parameters())
+  @parameterized.named_parameters(
+      *test_base.ProtoOpTestBase.named_parameters(extension=False))
   def testPacked(self, case):
     # Now try with the packed serialization.
     #
@@ -242,8 +242,7 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
         # Note: float_format='.17g' is necessary to ensure preservation of
         # doubles and floats in text format.
         text_format.Parse(
-            text_format.MessageToString(
-                value, float_format='.17g'),
+            text_format.MessageToString(value, float_format='.17g'),
             test_example_pb2.PackedTestValue()).SerializeToString()
         for value in case.values
     ]
@@ -297,14 +296,13 @@ class DecodeProtoOpTestBase(test_base.ProtoOpTestBase, parameterized.TestCase):
     field_names = ['sizes']
     field_types = [dtypes.int32]
 
-    with self.test_session() as sess:
-      ctensor, vtensor = self._decode_module.decode_proto(
-          batch,
-          message_type=msg_type,
-          field_names=field_names,
-          output_types=field_types,
-          sanitize=sanitize)
-      with self.assertRaisesRegexp(errors.DataLossError,
-                                   'Unable to parse binary protobuf'
-                                   '|Failed to consume entire buffer'):
-        _ = sess.run([ctensor] + vtensor)
+    with self.assertRaisesRegexp(
+        errors.DataLossError, 'Unable to parse binary protobuf'
+        '|Failed to consume entire buffer'):
+      self.evaluate(
+          self._decode_module.decode_proto(
+              batch,
+              message_type=msg_type,
+              field_names=field_names,
+              output_types=field_types,
+              sanitize=sanitize))

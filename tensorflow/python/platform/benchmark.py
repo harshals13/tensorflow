@@ -27,8 +27,10 @@ import time
 import six
 
 from tensorflow.core.protobuf import config_pb2
+from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.core.util import test_log_pb2
 from tensorflow.python.client import timeline
+from tensorflow.python.framework import ops
 from tensorflow.python.platform import app
 from tensorflow.python.platform import gfile
 from tensorflow.python.platform import tf_logging as logging
@@ -43,6 +45,10 @@ GLOBAL_BENCHMARK_REGISTRY = set()
 # Environment variable that determines whether benchmarks are written.
 # See also tensorflow/core/util/reporter.h TestReporter::kTestReporterEnv.
 TEST_REPORTER_TEST_ENV = "TEST_REPORT_FILE_PREFIX"
+
+# Environment variable that lets the TensorFlow runtime allocate a new
+# threadpool for each benchmark.
+OVERRIDE_GLOBAL_THREADPOOL = "TF_OVERRIDE_GLOBAL_THREADPOOL"
 
 
 def _global_report_benchmark(
@@ -182,9 +188,28 @@ class Benchmark(six.with_metaclass(_BenchmarkRegistrar, object)):
         throughput=throughput, extras=extras)
 
 
+@tf_export("test.benchmark_config")
+def benchmark_config():
+  """Returns a tf.ConfigProto for disabling the dependency optimizer.
+
+    Returns:
+      A TensorFlow ConfigProto object.
+  """
+  config = config_pb2.ConfigProto()
+  config.graph_options.rewrite_options.dependency_optimization = (
+      rewriter_config_pb2.RewriterConfig.OFF)
+  return config
+
+
 @tf_export("test.Benchmark")
 class TensorFlowBenchmark(Benchmark):
   """Abstract class that provides helpers for TensorFlow benchmarks."""
+
+  def __init__(self):
+    # Allow TensorFlow runtime to allocate a new threadpool with different
+    # number of threads for each new benchmark.
+    os.environ[OVERRIDE_GLOBAL_THREADPOOL] = "1"
+    super(TensorFlowBenchmark, self).__init__()
 
   @classmethod
   def is_abstract(cls):
@@ -284,6 +309,18 @@ class TensorFlowBenchmark(Benchmark):
     self.report_benchmark(**benchmark_values)
     benchmark_values["extras"].update(unreported_extras)
     return benchmark_values
+
+  def evaluate(self, tensors):
+    """Evaluates tensors and returns numpy values.
+
+    Args:
+      tensors: A Tensor or a nested list/tuple of Tensors.
+
+    Returns:
+      tensors numpy values.
+    """
+    sess = ops.get_default_session() or self.cached_session()
+    return sess.run(tensors)
 
 
 def _run_benchmarks(regex):
